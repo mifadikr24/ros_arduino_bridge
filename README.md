@@ -8,6 +8,8 @@ This is a fork of the original code, with some changes, and removal of the ROS n
 As I only have need for a subset of the functionality, I have no idea what does and doesn't work, beyond what is detailed below.
 Feedback/improvements are welcome (though no promises on how quickly I'll respond). I currently only use the L298N driver, and the Arduino encoder mode.
 
+This code tested on Arduino Uno and working properly.
+
 
 
 TODO
