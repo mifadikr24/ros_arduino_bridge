@@ -1,4 +1,15 @@
-/* Functions and type-defs for PID control.
+/* Functions and type-defs for PID control: 4WD version.
+
+   PID architecture:
+   - There are 4 PID loops independently: flPID, frPID, rlPID, rrPID
+   - ROS2 only send 2 targets (left, right)
+   - Targets broadcasted : left: flPID and rlPID
+                          right: frPID and rrPID
+   - Feedback to ROS2: the average of encoder per side
+       left_reported  = (fl_enc + rl_enc) / 2
+       right_reported = (fr_enc + rr_enc) / 2
+
+   Functions and type-defs for PID control.
 
    Taken mostly from Mike Ferguson's ArbotiX code which lives at:
    
@@ -7,16 +18,16 @@
 
 /* PID setpoint info For a Motor */
 typedef struct {
-  double TargetTicksPerFrame;    // target speed in ticks per frame
-  long Encoder;                  // encoder count
-  long PrevEnc;                  // last encoder count
+  double TargetTicksPerFrame;  // target speed in ticks per frame
+  long Encoder;                // encoder count
+  long PrevEnc;                // last encoder count
 
   /*
   * Using previous input (PrevInput) instead of PrevError to avoid derivative kick,
   * see http://brettbeauregard.com/blog/2011/04/improving-the-beginner%E2%80%99s-pid-derivative-kick/
   */
-  int PrevInput;                // last input
-  //int PrevErr;                   // last error
+  int PrevInput;               // last input
+  //int PrevErr;                 // last error
 
   /*
   * Using integrated term (ITerm) instead of integrated error (Ierror),
@@ -24,16 +35,15 @@ typedef struct {
   * see http://brettbeauregard.com/blog/2011/04/improving-the-beginner%E2%80%99s-pid-tuning-changes/
   */
   //int Ierror;
-  int ITerm;                    //integrated term
-
-  long output;                    // last motor setting
-}
+  int ITerm;                   //integrated term
+  long output;                 // last motor setting
+} 
 SetPointInfo;
 
-SetPointInfo leftPID, rightPID;
+SetPointInfo flPID, frPID, rlPID, rrPID;
 
 /* PID Parameters */
-int Kp = 20;
+int Kp = 40;
 int Kd = 12;
 int Ki = 0;
 int Ko = 50;
@@ -48,20 +58,34 @@ unsigned char moving = 0; // is the base in motion?
 * Note that the assumption here is that PID is only turned on
 * when going from stop to moving, that's why we can init everything on zero.
 */
-void resetPID(){
-   leftPID.TargetTicksPerFrame = 0.0;
-   leftPID.Encoder = readEncoder(LEFT);
-   leftPID.PrevEnc = leftPID.Encoder;
-   leftPID.output = 0;
-   leftPID.PrevInput = 0;
-   leftPID.ITerm = 0;
+void resetPID() {
+  flPID.TargetTicksPerFrame = 0.0;
+  flPID.Encoder  = readEncoder(FRONT_LEFT);
+  flPID.PrevEnc  = flPID.Encoder;
+  flPID.output   = 0;
+  flPID.PrevInput = 0;
+  flPID.ITerm    = 0;
 
-   rightPID.TargetTicksPerFrame = 0.0;
-   rightPID.Encoder = readEncoder(RIGHT);
-   rightPID.PrevEnc = rightPID.Encoder;
-   rightPID.output = 0;
-   rightPID.PrevInput = 0;
-   rightPID.ITerm = 0;
+  frPID.TargetTicksPerFrame = 0.0;
+  frPID.Encoder  = readEncoder(FRONT_RIGHT);
+  frPID.PrevEnc  = frPID.Encoder;
+  frPID.output   = 0;
+  frPID.PrevInput = 0;
+  frPID.ITerm    = 0;
+
+  rlPID.TargetTicksPerFrame = 0.0;
+  rlPID.Encoder  = readEncoder(REAR_LEFT);
+  rlPID.PrevEnc  = rlPID.Encoder;
+  rlPID.output   = 0;
+  rlPID.PrevInput = 0;
+  rlPID.ITerm    = 0;
+
+  rrPID.TargetTicksPerFrame = 0.0;
+  rrPID.Encoder  = readEncoder(REAR_RIGHT);
+  rrPID.PrevEnc  = rrPID.Encoder;
+  rrPID.output   = 0;
+  rrPID.PrevInput = 0;
+  rrPID.ITerm    = 0;
 }
 
 /* PID routine to compute the next motor commands */
@@ -71,9 +95,8 @@ void doPID(SetPointInfo * p) {
   int input;
 
   //Perror = p->TargetTicksPerFrame - (p->Encoder - p->PrevEnc);
-  input = p->Encoder - p->PrevEnc;
+  input  = p->Encoder - p->PrevEnc;
   Perror = p->TargetTicksPerFrame - input;
-
 
   /*
   * Avoid derivative kick and allow tuning changes,
@@ -98,33 +121,51 @@ void doPID(SetPointInfo * p) {
   */
     p->ITerm += Ki * Perror;
 
-  p->output = output;
+  p->output   = output;
   p->PrevInput = input;
 }
 
 /* Read the encoder values and call the PID routine */
 void updatePID() {
   /* Read the encoders */
-  leftPID.Encoder = readEncoder(LEFT);
-  rightPID.Encoder = readEncoder(RIGHT);
-  
+  flPID.Encoder = readEncoder(FRONT_LEFT);
+  frPID.Encoder = readEncoder(FRONT_RIGHT);
+  rlPID.Encoder = readEncoder(REAR_LEFT);
+  rrPID.Encoder = readEncoder(REAR_RIGHT);
+
   /* If we're not moving there is nothing more to do */
-  if (!moving){
+  if (!moving) {
     /*
     * Reset PIDs once, to prevent startup spikes,
     * see http://brettbeauregard.com/blog/2011/04/improving-the-beginner%E2%80%99s-pid-initialization/
     * PrevInput is considered a good proxy to detect
     * whether reset has already happened
     */
-    if (leftPID.PrevInput != 0 || rightPID.PrevInput != 0) resetPID();
+    if (flPID.PrevInput != 0 || frPID.PrevInput != 0 ||
+        rlPID.PrevInput != 0 || rrPID.PrevInput != 0) {
+      resetPID();
+    }
     return;
   }
 
   /* Compute PID update for each motor */
-  doPID(&rightPID);
-  doPID(&leftPID);
+  doPID(&flPID);
+  doPID(&frPID);
+  doPID(&rlPID);
+  doPID(&rrPID);
 
   /* Set the motor speeds accordingly */
-  setMotorSpeeds(leftPID.output, rightPID.output);
+  setMotorSpeed(FRONT_LEFT,  flPID.output);
+  setMotorSpeed(FRONT_RIGHT, frPID.output);
+  setMotorSpeed(REAR_LEFT,   rlPID.output);
+  setMotorSpeed(REAR_RIGHT,  rrPID.output);
 }
 
+/* Helper: calculate the encoder average per side that sends to ROS2 */
+long getLeftEncoderAvg() {
+  return (readEncoder(FRONT_LEFT) + readEncoder(REAR_LEFT)) / 2;
+}
+
+long getRightEncoderAvg() {
+  return (readEncoder(FRONT_RIGHT) + readEncoder(REAR_RIGHT)) / 2;
+}

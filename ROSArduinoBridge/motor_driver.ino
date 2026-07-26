@@ -1,93 +1,88 @@
 /***************************************************************
-   Motor driver definitions
-   
-   Add a "#elif defined" block to this file to include support
-   for a particular motor driver.  Then add the appropriate
-   #define near the top of the main ROSArduinoBridge.ino file.
-   
-   *************************************************************/
+  Motor driver implementation 4WD version
+  Hardware: 2x L298N dual H-bridge
+  
+  setMotorSpeed(i, spd):
+    i   = FRONT_LEFT | FRONT_RIGHT | REAR_LEFT | REAR_RIGHT
+    spd = -255 .. +255 (negative = backward)
+
+  setMotorSpeeds(leftSpeed, rightSpeed):
+    Broadcast: leftSpeed  -> FL dan RL
+               rightSpeed -> FR dan RR
+    This is the main interface that called by PID controller.
+***************************************************************/
 
 #ifdef USE_BASE
-   
-#ifdef POLOLU_VNH5019
-  /* Include the Pololu library */
-  #include "DualVNH5019MotorShield.h"
+#ifdef L298_MOTOR_DRIVER
 
-  /* Create the motor driver object */
-  DualVNH5019MotorShield drive;
-  
-  /* Wrap the motor driver initialization */
-  void initMotorController() {
-    drive.init();
-  }
+void initMotorController() {
+  pinMode(FL_MOTOR_ENABLE,   OUTPUT);
+  pinMode(RL_MOTOR_ENABLE,   OUTPUT);
+  pinMode(FR_MOTOR_ENABLE,   OUTPUT);
+  pinMode(RR_MOTOR_ENABLE,   OUTPUT);
 
-  /* Wrap the drive motor set speed function */
-  void setMotorSpeed(int i, int spd) {
-    if (i == LEFT) drive.setM1Speed(spd);
-    else drive.setM2Speed(spd);
-  }
+  pinMode(FL_MOTOR_FORWARD,  OUTPUT);
+  pinMode(FL_MOTOR_BACKWARD, OUTPUT);
+  pinMode(RL_MOTOR_FORWARD,  OUTPUT);
+  pinMode(RL_MOTOR_BACKWARD, OUTPUT);
+  pinMode(FR_MOTOR_FORWARD,  OUTPUT);
+  pinMode(FR_MOTOR_BACKWARD, OUTPUT);
+  pinMode(RR_MOTOR_FORWARD,  OUTPUT);
+  pinMode(RR_MOTOR_BACKWARD, OUTPUT);
 
-  // A convenience function for setting both motor speeds
-  void setMotorSpeeds(int leftSpeed, int rightSpeed) {
-    setMotorSpeed(LEFT, leftSpeed);
-    setMotorSpeed(RIGHT, rightSpeed);
-  }
-#elif defined POLOLU_MC33926
-  /* Include the Pololu library */
-  #include "DualMC33926MotorShield.h"
+  digitalWrite(FL_MOTOR_ENABLE, HIGH);
+  digitalWrite(RL_MOTOR_ENABLE, HIGH);
+  digitalWrite(FR_MOTOR_ENABLE, HIGH);
+  digitalWrite(RR_MOTOR_ENABLE, HIGH);
+}
 
-  /* Create the motor driver object */
-  DualMC33926MotorShield drive;
-  
-  /* Wrap the motor driver initialization */
-  void initMotorController() {
-    drive.init();
-  }
+/* Setting speed of satu motor.
+   Using analogWrite on ENABLE pin and digitalWrite on
+   direction pin (IN1/IN2 style: FWD=HIGH/LOW, BWD=LOW/HIGH). */
+void setMotorSpeed(int i, int spd) {
+  uint8_t reverse = 0;
 
-  /* Wrap the drive motor set speed function */
-  void setMotorSpeed(int i, int spd) {
-    if (i == LEFT) drive.setM1Speed(spd);
-    else drive.setM2Speed(spd);
+  if (spd < 0) {
+    spd = -spd;
+    reverse = 1;
   }
+  if (spd > MAX_PWM) spd = MAX_PWM;
 
-  // A convenience function for setting both motor speeds
-  void setMotorSpeeds(int leftSpeed, int rightSpeed) {
-    setMotorSpeed(LEFT, leftSpeed);
-    setMotorSpeed(RIGHT, rightSpeed);
+  switch (i) {
+    case FRONT_LEFT:
+      analogWrite(FL_MOTOR_ENABLE, spd);
+      digitalWrite(FL_MOTOR_FORWARD,  reverse ? LOW  : HIGH);
+      digitalWrite(FL_MOTOR_BACKWARD, reverse ? HIGH : LOW);
+      break;
+
+    case REAR_LEFT:
+      analogWrite(RL_MOTOR_ENABLE, spd);
+      digitalWrite(RL_MOTOR_FORWARD,  reverse ? LOW  : HIGH);
+      digitalWrite(RL_MOTOR_BACKWARD, reverse ? HIGH : LOW);
+      break;
+
+    case FRONT_RIGHT:
+      analogWrite(FR_MOTOR_ENABLE, spd);
+      digitalWrite(FR_MOTOR_FORWARD,  reverse ? LOW  : HIGH);
+      digitalWrite(FR_MOTOR_BACKWARD, reverse ? HIGH : LOW);
+      break;
+
+    case REAR_RIGHT:
+      analogWrite(RR_MOTOR_ENABLE, spd);
+      digitalWrite(RR_MOTOR_FORWARD,  reverse ? LOW  : HIGH);
+      digitalWrite(RR_MOTOR_BACKWARD, reverse ? HIGH : LOW);
+      break;
   }
-#elif defined L298_MOTOR_DRIVER
-  void initMotorController() {
-    digitalWrite(RIGHT_MOTOR_ENABLE, HIGH);
-    digitalWrite(LEFT_MOTOR_ENABLE, HIGH);
-  }
-  
-  void setMotorSpeed(int i, int spd) {
-    unsigned char reverse = 0;
-  
-    if (spd < 0)
-    {
-      spd = -spd;
-      reverse = 1;
-    }
-    if (spd > 255)
-      spd = 255;
-    
-    if (i == LEFT) { 
-      if      (reverse == 0) { analogWrite(LEFT_MOTOR_FORWARD, spd); analogWrite(LEFT_MOTOR_BACKWARD, 0); }
-      else if (reverse == 1) { analogWrite(LEFT_MOTOR_BACKWARD, spd); analogWrite(LEFT_MOTOR_FORWARD, 0); }
-    }
-    else /*if (i == RIGHT) //no need for condition*/ {
-      if      (reverse == 0) { analogWrite(RIGHT_MOTOR_FORWARD, spd); analogWrite(RIGHT_MOTOR_BACKWARD, 0); }
-      else if (reverse == 1) { analogWrite(RIGHT_MOTOR_BACKWARD, spd); analogWrite(RIGHT_MOTOR_FORWARD, 0); }
-    }
-  }
-  
-  void setMotorSpeeds(int leftSpeed, int rightSpeed) {
-    setMotorSpeed(LEFT, leftSpeed);
-    setMotorSpeed(RIGHT, rightSpeed);
-  }
+}
+
+void setMotorSpeeds(int leftSpeed, int rightSpeed) {
+  setMotorSpeed(FRONT_LEFT,  leftSpeed);
+  setMotorSpeed(REAR_LEFT,   leftSpeed);
+  setMotorSpeed(FRONT_RIGHT, rightSpeed);
+  setMotorSpeed(REAR_RIGHT,  rightSpeed);
+}
+
 #else
   #error A motor driver must be selected!
 #endif
-
 #endif

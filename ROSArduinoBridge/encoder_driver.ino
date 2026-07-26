@@ -1,82 +1,95 @@
-/* *************************************************************
-   Encoder definitions
+/* *************************************************************.
+   Encoder driver 4WD version
    
-   Add an "#ifdef" block to this file to include support for
-   a particular encoder board or library. Then add the appropriate
-   #define near the top of the main ROSArduinoBridge.ino file.
+   All the 4 encoders are connected to PORTK (A8 to A15) so they only
+   need an ISR: PCINT2_vect.
    
+   ISR reads 8 bit PORTK at once and processes each pair of pins
+   (A,B) per wheel with quadrature lookup table.
    ************************************************************ */
-   
+
 #ifdef USE_BASE
+#ifdef ARDUINO_ENC_COUNTER
 
-#ifdef ROBOGAIA
-  /* The Robogaia Mega Encoder shield */
-  #include "MegaEncoderCounter.h"
+volatile long fl_enc_pos = 0L;
+volatile long fr_enc_pos = 0L;
+volatile long rl_enc_pos = 0L;
+volatile long rr_enc_pos = 0L;
 
-  /* Create the encoder shield object */
-  MegaEncoderCounter encoders = MegaEncoderCounter(4); // Initializes the Mega Encoder Counter in the 4X Count mode
-  
-  /* Wrap the encoder reading function */
-  long readEncoder(int i) {
-    if (i == LEFT) return encoders.YAxisGetCount();
-    else return encoders.XAxisGetCount();
-  }
+/* Quadrature state machine lookup table.
+   Index = {prev_A, prev_B, curr_A, curr_B} as 4-bit value.
+   Output: +1, -1, or 0. */
+static const int8_t ENC_STATES[] = {
+   0,  1, -1,  0,
+  -1,  0,  0,  1,
+   1,  0,  0, -1,
+   0, -1,  1,  0
+};
 
-  /* Wrap the encoder reset function */
-  void resetEncoder(int i) {
-    if (i == LEFT) return encoders.YAxisReset();
-    else return encoders.XAxisReset();
-  }
-#elif defined(ARDUINO_ENC_COUNTER)
-  volatile long left_enc_pos = 0L;
-  volatile long right_enc_pos = 0L;
-  static const int8_t ENC_STATES [] = {0,1,-1,0,-1,0,0,1,1,0,0,-1,0,-1,1,0};  //encoder lookup table
-    
-  /* Interrupt routine for LEFT encoder, taking care of actual counting */
-  ISR (PCINT2_vect){
-  	static uint8_t enc_last=0;
-        
-	enc_last <<=2; //shift previous state two places
-	enc_last |= (PIND & (3 << 2)) >> 2; //read the current state into lowest 2 bits
-  
-  	left_enc_pos += ENC_STATES[(enc_last & 0x0f)];
-  }
-  
-  /* Interrupt routine for RIGHT encoder, taking care of actual counting */
-  ISR (PCINT1_vect){
-        static uint8_t enc_last=0;
-          	
-	enc_last <<=2; //shift previous state two places
-	enc_last |= (PINC & (3 << 4)) >> 4; //read the current state into lowest 2 bits
-  
-  	right_enc_pos += ENC_STATES[(enc_last & 0x0f)];
-  }
-  
-  /* Wrap the encoder reading function */
-  long readEncoder(int i) {
-    if (i == LEFT) return left_enc_pos;
-    else return right_enc_pos;
+/* An ISR serves all the 4 encoders in PORTK */
+ISR (PCINT2_vect) {
+  static uint8_t portk_last = 0;
+  uint8_t portk_now = PINK;  // read entire PORTK at once
+  uint8_t changed   = portk_now ^ portk_last;
+
+  /* --- FRONT LEFT: bit 0 (PA) and bit 1 (PB) --- */
+  if (changed & 0x03) {
+    uint8_t state = ((portk_last & 0x03) << 2) | (portk_now & 0x03);
+    fl_enc_pos += ENC_STATES[state];
   }
 
-  /* Wrap the encoder reset function */
-  void resetEncoder(int i) {
-    if (i == LEFT){
-      left_enc_pos=0L;
-      return;
-    } else { 
-      right_enc_pos=0L;
-      return;
-    }
+  /* --- REAR LEFT: bit 2 (PA) and bit 3 (PB) --- */
+  if (changed & 0x0C) {
+    uint8_t state = (((portk_last & 0x0C) >> 2) << 2) | ((portk_now & 0x0C) >> 2);
+    rl_enc_pos += ENC_STATES[state];
   }
+
+  /* --- FRONT RIGHT: bit 4 (PA) and bit 5 (PB) --- */
+  if (changed & 0x30) {
+    uint8_t state = (((portk_last & 0x30) >> 4) << 2) | ((portk_now & 0x30) >> 4);
+    fr_enc_pos += ENC_STATES[state];
+  }
+
+  /* --- REAR RIGHT: bit 6 (PA) and bit 7 (PB) --- */
+  if (changed & 0xC0) {
+    uint8_t state = (((portk_last & 0xC0) >> 6) << 2) | ((portk_now & 0xC0) >> 6);
+    rr_enc_pos += ENC_STATES[state];
+  }
+
+  portk_last = portk_now;
+}
+
+/* Wrap the encoder reading function */
+long readEncoder(int i) {
+  switch (i) {
+    case FRONT_LEFT:  return fl_enc_pos;
+    case FRONT_RIGHT: return fr_enc_pos;
+    case REAR_LEFT:   return rl_enc_pos;
+    case REAR_RIGHT:  return rr_enc_pos;
+    default:          return 0;
+  }
+}
+
+/* Wrap the encoder reset function based-on wheel's index */
+void resetEncoder(int i) {
+  switch (i) {
+    case FRONT_LEFT:  fl_enc_pos = 0L; break;
+    case FRONT_RIGHT: fr_enc_pos = 0L; break;
+    case REAR_LEFT:   rl_enc_pos = 0L; break;
+    case REAR_RIGHT:  rr_enc_pos = 0L; break;
+  }
+}
+
 #else
   #error A encoder driver must be selected!
 #endif
 
 /* Wrap the encoder reset function */
 void resetEncoders() {
-  resetEncoder(LEFT);
-  resetEncoder(RIGHT);
+  resetEncoder(FRONT_LEFT);
+  resetEncoder(FRONT_RIGHT);
+  resetEncoder(REAR_LEFT);
+  resetEncoder(REAR_RIGHT);
 }
 
 #endif
-

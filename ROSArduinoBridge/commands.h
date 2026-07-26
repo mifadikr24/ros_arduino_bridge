@@ -19,9 +19,16 @@
 #define UPDATE_PID     'u'
 #define DIGITAL_WRITE  'w'
 #define ANALOG_WRITE   'x'
-#define LEFT            0
-#define RIGHT           1
+
+/* Wheel index constants for 4WD */
+#define FRONT_LEFT    0
+#define FRONT_RIGHT   1
+#define REAR_LEFT     2
+#define REAR_RIGHT    3
+
+/* Legacy alliance: some the function still used LEFT/RIGHT
+   as indexes per side, mapping to rear wheels as referneces. */
+#define LEFT          REAR_LEFT
+#define RIGHT         REAR_RIGHT
 
 #endif
-
-

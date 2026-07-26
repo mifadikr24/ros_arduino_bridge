@@ -45,20 +45,26 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#define USE_BASE      // Enable the base controller code
-//#undef USE_BASE     // Disable the base controller code
+ /*********************************************************************
+ *  ROSArduinoBridge 4WD version
+ *  Platform: Arduino Mega 2560
+ *
+ *  Serial protocol:
+ *    READ_ENCODERS ('e') -> reply: "avg_left avg_right\r\n"
+ *      avg_left  = (FL + RL) / 2
+ *      avg_right = (FR + RR) / 2
+ *    MOTOR_SPEEDS  ('m') -> arg1=leftTicks arg2=rightTicks
+ *      broadcast: left  -> FL, RL
+ *                 right -> FR, RR
+ *
+ *  All other commands are identically same as 2WD version.
+ *********************************************************************/
+
+#define USE_BASE       // Enable the base controller code
+//#undef USE_BASE      // Disable the base controller code
 
 /* Define the motor controller and encoder library you are using */
 #ifdef USE_BASE
-   /* The Pololu VNH5019 dual motor driver shield */
-   //#define POLOLU_VNH5019
-
-   /* The Pololu MC33926 dual motor driver shield */
-   //#define POLOLU_MC33926
-
-   /* The RoboGaia encoder shield */
-   //#define ROBOGAIA
-   
    /* Encoders directly attached to Arduino board */
    #define ARDUINO_ENC_COUNTER
 
@@ -66,14 +72,14 @@
    #define L298_MOTOR_DRIVER
 #endif
 
-//#define USE_SERVOS  // Enable use of PWM servos as defined in servos.h
+//#define USE_SERVOS  // Enable use of PWM servos as defined in servos
 #undef USE_SERVOS     // Disable use of PWM servos
 
 /* Serial port baud rate */
-#define BAUDRATE     57600
+#define BAUDRATE   57600
 
 /* Maximum PWM signal */
-#define MAX_PWM        255
+#define MAX_PWM    255
 
 #if defined(ARDUINO) && ARDUINO >= 100
 #include "Arduino.h"
@@ -104,11 +110,11 @@
   #include "diff_controller.h"
 
   /* Run the PID loop at 30 times per second */
-  #define PID_RATE           30     // Hz
+  #define PID_RATE      30          // Hz
 
   /* Convert the rate into an interval */
   const int PID_INTERVAL = 1000 / PID_RATE;
-  
+
   /* Track the next time we make a PID calculation */
   unsigned long nextPID = PID_INTERVAL;
 
@@ -121,7 +127,7 @@
 /* Variable initialization */
 
 // A pair of varibles to help parse serial commands (thanks Fergs)
-int arg = 0;
+int arg   = 0;
 int index = 0;
 
 // Variable to hold an input character
@@ -145,7 +151,7 @@ void resetCommand() {
   memset(argv2, 0, sizeof(argv2));
   arg1 = 0;
   arg2 = 0;
-  arg = 0;
+  arg  = 0;
   index = 0;
 }
 
@@ -157,91 +163,109 @@ int runCommand() {
   int pid_args[4];
   arg1 = atoi(argv1);
   arg2 = atoi(argv2);
-  
-  switch(cmd) {
-  case GET_BAUDRATE:
-    Serial.println(BAUDRATE);
-    break;
-  case ANALOG_READ:
-    Serial.println(analogRead(arg1));
-    break;
-  case DIGITAL_READ:
-    Serial.println(digitalRead(arg1));
-    break;
-  case ANALOG_WRITE:
-    analogWrite(arg1, arg2);
-    Serial.println("OK"); 
-    break;
-  case DIGITAL_WRITE:
-    if (arg2 == 0) digitalWrite(arg1, LOW);
-    else if (arg2 == 1) digitalWrite(arg1, HIGH);
-    Serial.println("OK"); 
-    break;
-  case PIN_MODE:
-    if (arg2 == 0) pinMode(arg1, INPUT);
-    else if (arg2 == 1) pinMode(arg1, OUTPUT);
-    Serial.println("OK");
-    break;
-  case PING:
-    Serial.println(Ping(arg1));
-    break;
+
+  switch (cmd) {
+    case GET_BAUDRATE:
+      Serial.println(BAUDRATE);
+      break;
+    case ANALOG_READ:
+      Serial.println(analogRead(arg1));
+      break;
+    case DIGITAL_READ:
+      Serial.println(digitalRead(arg1));
+      break;
+    case ANALOG_WRITE:
+      analogWrite(arg1, arg2);
+      Serial.println("OK");
+      break;
+    case DIGITAL_WRITE:
+      if (arg2 == 0)      digitalWrite(arg1, LOW);
+      else if (arg2 == 1) digitalWrite(arg1, HIGH);
+      Serial.println("OK");
+      break;
+    case PIN_MODE:
+      if (arg2 == 0)      pinMode(arg1, INPUT);
+      else if (arg2 == 1) pinMode(arg1, OUTPUT);
+      Serial.println("OK");
+      break;
+    case PING:
+      Serial.println(Ping(arg1));
+      break;
+
 #ifdef USE_SERVOS
-  case SERVO_WRITE:
-    servos[arg1].setTargetPosition(arg2);
-    Serial.println("OK");
-    break;
-  case SERVO_READ:
-    Serial.println(servos[arg1].getServo().read());
-    break;
+    case SERVO_WRITE:
+      servos[arg1].setTargetPosition(arg2);
+      Serial.println("OK");
+      break;
+    case SERVO_READ:
+      Serial.println(servos[arg1].getServo().read());
+      break;
 #endif
-    
+
 #ifdef USE_BASE
-  case READ_ENCODERS:
-    Serial.print(readEncoder(LEFT));
-    Serial.print(" ");
-    Serial.println(readEncoder(RIGHT));
-    break;
-   case RESET_ENCODERS:
-    resetEncoders();
-    resetPID();
-    Serial.println("OK");
-    break;
-  case MOTOR_SPEEDS:
-    /* Reset the auto stop timer */
-    lastMotorCommand = millis();
-    if (arg1 == 0 && arg2 == 0) {
-      setMotorSpeeds(0, 0);
+    case READ_ENCODERS:
+      /* Send the average per side to ROS2 */
+      Serial.print(getLeftEncoderAvg());
+      Serial.print(" ");
+      Serial.println(getRightEncoderAvg());
+      break;
+
+    case RESET_ENCODERS:
+      resetEncoders();
       resetPID();
-      moving = 0;
-    }
-    else moving = 1;
-    leftPID.TargetTicksPerFrame = arg1;
-    rightPID.TargetTicksPerFrame = arg2;
-    Serial.println("OK"); 
-    break;
-  case MOTOR_RAW_PWM:
+      Serial.println("OK");
+      break;
+
+    case MOTOR_SPEEDS:
+      /* Reset the auto stop timer */
+      lastMotorCommand = millis();
+      if (arg1 == 0 && arg2 == 0) {
+        setMotorSpeed(FRONT_LEFT,  0);
+        setMotorSpeed(FRONT_RIGHT, 0);
+        setMotorSpeed(REAR_LEFT,   0);
+        setMotorSpeed(REAR_RIGHT,  0);
+        resetPID();
+        moving = 0;
+      } else {
+        moving = 1;
+      }
+      /* Broadcast target to 4 PID loops */
+      flPID.TargetTicksPerFrame = arg1;
+      rlPID.TargetTicksPerFrame = arg1;
+      frPID.TargetTicksPerFrame = arg2;
+      rrPID.TargetTicksPerFrame = arg2;
+      Serial.println("OK");
+      break;
+
+    case MOTOR_RAW_PWM:
     /* Reset the auto stop timer */
-    lastMotorCommand = millis();
-    resetPID();
-    moving = 0; // Sneaky way to temporarily disable the PID
-    setMotorSpeeds(arg1, arg2);
-    Serial.println("OK"); 
-    break;
-  case UPDATE_PID:
-    while ((str = strtok_r(p, ":", &p)) != '\0') {
-       pid_args[i] = atoi(str);
-       i++;
-    }
-    Kp = pid_args[0];
-    Kd = pid_args[1];
-    Ki = pid_args[2];
-    Ko = pid_args[3];
-    Serial.println("OK");
-    break;
+      lastMotorCommand = millis();
+      resetPID();
+      moving = 0; // Sneaky way to temporarily disable the PID
+      /* Raw PWM: arg1=left, arg2=right - broadcasted directly */
+      setMotorSpeed(FRONT_LEFT,  arg1);
+      setMotorSpeed(REAR_LEFT,   arg1);
+      setMotorSpeed(FRONT_RIGHT, arg2);
+      setMotorSpeed(REAR_RIGHT,  arg2);
+      Serial.println("OK");
+      break;
+
+    case UPDATE_PID:
+      while ((str = strtok_r(p, ":", &p)) != '\0') {
+        pid_args[i] = atoi(str);
+        i++;
+      }
+      Kp = pid_args[0];
+      Kd = pid_args[1];
+      Ki = pid_args[2];
+      Ko = pid_args[3];
+      Serial.println("OK");
+      break;
 #endif
-  default:
-    Serial.println("Invalid Command");
-    break;
+
+    default:
+      Serial.println("Invalid Command");
+      break;
   }
 }
 
@@ -252,40 +276,33 @@ void setup() {
 // Initialize the motor controller if used */
 #ifdef USE_BASE
   #ifdef ARDUINO_ENC_COUNTER
-    //set as inputs
-    DDRD &= ~(1<<LEFT_ENC_PIN_A);
-    DDRD &= ~(1<<LEFT_ENC_PIN_B);
-    DDRC &= ~(1<<RIGHT_ENC_PIN_A);
-    DDRC &= ~(1<<RIGHT_ENC_PIN_B);
-    
-    //enable pull up resistors
-    PORTD |= (1<<LEFT_ENC_PIN_A);
-    PORTD |= (1<<LEFT_ENC_PIN_B);
-    PORTC |= (1<<RIGHT_ENC_PIN_A);
-    PORTC |= (1<<RIGHT_ENC_PIN_B);
-    
-    // tell pin change mask to listen to left encoder pins
-    PCMSK2 |= (1 << LEFT_ENC_PIN_A)|(1 << LEFT_ENC_PIN_B);
-    // tell pin change mask to listen to right encoder pins
-    PCMSK1 |= (1 << RIGHT_ENC_PIN_A)|(1 << RIGHT_ENC_PIN_B);
-    
-    // enable PCINT1 and PCINT2 interrupt in the general interrupt mask
-    PCICR |= (1 << PCIE1) | (1 << PCIE2);
+    /* Set all PORTK pins as inputs */
+    DDRK = 0x00;
+
+    /* Enable pull-up resistor in all 8 bit PORTK */
+    PORTK = 0xFF;
+
+    /* Enable pin-change interrupt for entire PORTK pins (PCINT16 to 23) */
+    PCMSK2 = 0xFF;
+
+    /* Enable PCINT2 in register PCICR */
+    PCICR |= (1 << PCIE2);
   #endif
+
   initMotorController();
   resetPID();
 #endif
 
 /* Attach servos if used */
-  #ifdef USE_SERVOS
-    int i;
-    for (i = 0; i < N_SERVOS; i++) {
-      servos[i].initServo(
-          servoPins[i],
-          stepDelay[i],
-          servoInitPosition[i]);
-    }
-  #endif
+#ifdef USE_SERVOS
+  int i;
+  for (i = 0; i < N_SERVOS; i++) {
+    servos[i].initServo(
+        servoPins[i],
+        stepDelay[i],
+        servoInitPosition[i]);
+  }
+#endif
 }
 
 /* Enter the main loop.  Read and parse input from the serial port
@@ -294,10 +311,9 @@ void setup() {
 */
 void loop() {
   while (Serial.available() > 0) {
-    
     // Read the next character
     chr = Serial.read();
-
+    
     // Terminate a command with a CR
     if (chr == 13) {
       if (arg == 1) argv1[index] = NULL;
@@ -309,7 +325,7 @@ void loop() {
     else if (chr == ' ') {
       // Step through the arguments
       if (arg == 0) arg = 1;
-      else if (arg == 1)  {
+      else if (arg == 1) {
         argv1[index] = NULL;
         arg = 2;
         index = 0;
@@ -332,17 +348,20 @@ void loop() {
       }
     }
   }
-  
+
 // If we are using base control, run a PID calculation at the appropriate intervals
 #ifdef USE_BASE
   if (millis() > nextPID) {
     updatePID();
     nextPID += PID_INTERVAL;
   }
-  
+
   // Check to see if we have exceeded the auto-stop interval
-  if ((millis() - lastMotorCommand) > AUTO_STOP_INTERVAL) {;
-    setMotorSpeeds(0, 0);
+  if ((millis() - lastMotorCommand) > AUTO_STOP_INTERVAL) {
+    setMotorSpeed(FRONT_LEFT,  0);
+    setMotorSpeed(FRONT_RIGHT, 0);
+    setMotorSpeed(REAR_LEFT,   0);
+    setMotorSpeed(REAR_RIGHT,  0);
     moving = 0;
   }
 #endif
@@ -355,4 +374,3 @@ void loop() {
   }
 #endif
 }
-
